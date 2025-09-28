@@ -1,0 +1,13 @@
+package com.onafriq.paylite.service.paylite_service.repository;
+
+import com.onafriq.paylite.service.paylite_service.entity.WebhookEvent;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+import java.util.Optional;
+
+@Repository
+public interface WebhookEventRepository extends JpaRepository<WebhookEvent, Long> {
+    Optional<WebhookEvent> findByEventId(String eventId);
+    boolean existsByEventId(String eventId);
+    boolean existsByPaymentIdAndEventType(String paymentId, String eventType);
+}
