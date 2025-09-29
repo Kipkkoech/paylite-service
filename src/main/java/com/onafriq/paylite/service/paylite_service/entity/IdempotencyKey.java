@@ -6,11 +6,10 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "idempotency_keys")
-@Getter
-@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@Data
 public class IdempotencyKey {
     
     @Id
