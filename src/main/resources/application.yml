@@ -34,3 +34,6 @@ management:
   endpoint:
     health:
       show-details: always
+app:
+  api-keys: ${API_KEYS}
+  webhook-secret: {WEBHOOK_SECRET}

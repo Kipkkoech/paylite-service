@@ -1,0 +1,93 @@
+package com.onafriq.paylite.service.paylite_service.service;
+
+import com.onafriq.paylite.service.paylite_service.dto.PaymentRequest;
+import com.onafriq.paylite.service.paylite_service.dto.PaymentResponse;
+import com.onafriq.paylite.service.paylite_service.entity.Payment;
+import com.onafriq.paylite.service.paylite_service.enums.PaymentStatus;
+import com.onafriq.paylite.service.paylite_service.repository.PaymentRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.UUID;
+
+import static com.onafriq.paylite.service.paylite_service.config.AppConstants.PAYMENT_ID_PREFIX;
+import static com.onafriq.paylite.service.paylite_service.config.AppConstants.WEBHOOK_EVENT_SUCCEEDED;
+
+@Service
+public class PaymentService {
+    private static final Logger logger = LoggerFactory.getLogger(PaymentService.class);
+
+    private final PaymentRepository paymentRepository;
+
+    public PaymentService(PaymentRepository paymentRepository) {
+        this.paymentRepository = paymentRepository;
+    }
+
+    @Transactional
+    public PaymentResponse createPayment(PaymentRequest request) {
+        String paymentId = generatePaymentId();
+
+        Payment payment = Payment.builder()
+                .paymentId(paymentId)
+                .amount(request.getAmount())
+                .currency(request.getCurrency())
+                .reference(request.getReference())
+                .customerEmail(request.getCustomerEmail())
+                .status(PaymentStatus.PENDING.toString())
+                .build();
+
+        paymentRepository.save(payment);
+        logger.info("Created payment with ID: {}", paymentId);
+
+        return PaymentResponse.builder().paymentId(paymentId)
+                .status(PaymentStatus.PENDING.toString())
+                .build();
+    }
+
+    public PaymentResponse getPayment(String paymentId) {
+        Payment payment = paymentRepository.findByPaymentId(paymentId)
+                .orElseThrow(() -> new RuntimeException("Payment not found"));
+
+        return new PaymentResponse(
+                payment.getPaymentId(),
+                payment.getStatus(),
+                payment.getAmount(),
+                payment.getCurrency(),
+                payment.getReference(),
+                payment.getCustomerEmail()
+        );
+    }
+
+    @Transactional
+    public void processWebhook(String paymentId, String event) {
+        Payment payment = paymentRepository.findByPaymentIdForUpdate(paymentId)
+                .orElseThrow(() -> new RuntimeException("Payment not found"));
+
+        String newStatus = WEBHOOK_EVENT_SUCCEEDED.equals(event) ? PaymentStatus.SUCCEEDED.toString() : PaymentStatus.FAILED.toString();
+
+        if (!PaymentStatus.SUCCEEDED.toString().equals(payment.getStatus()) && !PaymentStatus.FAILED.toString().equals(payment.getStatus())) {
+            payment.setStatus(newStatus);
+            paymentRepository.save(payment);
+            logger.info("Updated payment {} status to {}", paymentId, newStatus);
+        } else {
+            logger.info("Payment {} already in final status: {}", paymentId, payment.getStatus());
+        }
+    }
+
+    private String generatePaymentId() {
+        String paymentId;
+        int attempts = 0;
+
+        do {
+            paymentId = PAYMENT_ID_PREFIX + UUID.randomUUID().toString().substring(0, 8);
+            attempts++;
+
+            if (attempts > 5) {
+                throw new RuntimeException("Failed to generate unique payment ID after 5 attempts");
+            }
+        } while (paymentRepository.existsByPaymentId(paymentId));
+
+        return paymentId;
+    }
+}
