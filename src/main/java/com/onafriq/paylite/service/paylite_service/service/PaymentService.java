@@ -1,5 +1,7 @@
 package com.onafriq.paylite.service.paylite_service.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentRequest;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentResponse;
 import com.onafriq.paylite.service.paylite_service.entity.Payment;
@@ -19,13 +21,31 @@ public class PaymentService {
     private static final Logger logger = LoggerFactory.getLogger(PaymentService.class);
 
     private final PaymentRepository paymentRepository;
+    private final IdempotencyService idempotencyService;
 
-    public PaymentService(PaymentRepository paymentRepository) {
+    private final  ObjectMapper objectMapper;
+
+    public PaymentService(PaymentRepository paymentRepository, IdempotencyService idempotencyService,  ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
+        this.idempotencyService = idempotencyService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional
-    public PaymentResponse createPayment(PaymentRequest request) {
+    public PaymentResponse createPayment(PaymentRequest request, String idempotencyKey) throws Exception {
+        String requestHash = idempotencyService.calculateRequestHash(request);
+
+        // Check for existing response
+        var existingResponse = idempotencyService.getExistingResponse(idempotencyKey, requestHash);
+        if (existingResponse.isPresent()) {
+            return objectMapper.readValue(existingResponse.get(), PaymentResponse.class);
+        }
+
+        // Check for conflict
+        if (idempotencyService.hasConflict(idempotencyKey, requestHash)) {
+            throw new Exception("Idempotency-Key already used with different request");
+        }
+
         String paymentId = generatePaymentId();
 
         Payment payment = Payment.builder()

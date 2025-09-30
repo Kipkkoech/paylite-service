@@ -40,7 +40,7 @@ public class PaymentController {
             @RequestHeader("X-API-Key") String apiKey,
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody PaymentRequest request,
-            HttpServletRequest httpRequest) {
+            HttpServletRequest httpRequest) throws Exception {
 
         logger.warn("Starting create payment: {}", httpRequest.getRemoteAddr());
         // Validate API key
@@ -53,40 +53,9 @@ public class PaymentController {
         if (idempotencyKey == null || idempotencyKey.trim().isEmpty()) {
             return ResponseEntity.badRequest().body("Idempotency-Key header is required");
         }
-        
-        try {
-            // Calculate request hash for idempotency check
-            String requestHash = idempotencyService.calculateRequestHash(request);
-            
-            // Check for existing idempotency key
-            var existingResponse = idempotencyService.getExistingResponse(idempotencyKey, requestHash);
-            if (existingResponse.isPresent()) {
-                logger.info("Returning cached response for idempotency key: {}", idempotencyKey);
-                PaymentResponse response = objectMapper.readValue(existingResponse.get(), PaymentResponse.class);
-                return ResponseEntity.ok(response);
-            }
-            
-            // Check if idempotency key exists with different request (conflict)
-            if (idempotencyService.getExistingResponse(idempotencyKey, "different").isPresent()) {
-                logger.warn("Idempotency key conflict for key: {}", idempotencyKey);
-                return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body("Idempotency-Key already used with different request");
-            }
-            // Create new payment
-            PaymentResponse response = paymentService.createPayment(request);
-            
-            // Store idempotency key with response
-            String responseBody = objectMapper.writeValueAsString(response);
-            idempotencyService.storeIdempotencyKey(idempotencyKey, requestHash, responseBody, response.getPaymentId());
-            
-            logger.info("Created new payment with ID: {}", response.getPaymentId());
-            return ResponseEntity.ok(response);
-            
-        } catch (Exception e) {
-            logger.error("Error creating payment", e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error creating payment");
-        }
+
+        PaymentResponse response = paymentService.createPayment(request, idempotencyKey);
+        return ResponseEntity.ok(response);
     }
     
     @GetMapping("/{paymentId}")

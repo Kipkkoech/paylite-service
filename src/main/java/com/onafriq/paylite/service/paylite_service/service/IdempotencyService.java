@@ -52,4 +52,18 @@ public class IdempotencyService {
         idempotencyKeyRepository.save(key);
         logger.info("Stored idempotency key for payment: {}", paymentId);
     }
+
+    public boolean hasConflict(String idempotencyKey, String requestHash) {
+        Optional<IdempotencyKey> existingRecord =
+                idempotencyKeyRepository.findByKey(idempotencyKey);
+
+        if (existingRecord.isEmpty()) {
+            return false; // No conflict - key doesn't exist
+        }
+
+        IdempotencyKey record = existingRecord.get();
+
+        // Conflict if hash is different
+        return !record.getRequestHash().equals(requestHash);
+    }
 }
