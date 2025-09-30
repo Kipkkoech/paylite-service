@@ -3,6 +3,8 @@ package com.onafriq.paylite.service.paylite_service.controller;
 
 import com.onafriq.paylite.service.paylite_service.dto.PaymentRequest;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentResponse;
+import com.onafriq.paylite.service.paylite_service.exception.BadRequestException;
+import com.onafriq.paylite.service.paylite_service.exception.UnauthorizedException;
 import com.onafriq.paylite.service.paylite_service.service.IdempotencyService;
 import com.onafriq.paylite.service.paylite_service.service.PaymentService;
 import com.onafriq.paylite.service.paylite_service.service.SecurityService;
@@ -19,22 +21,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @RequestMapping("/api/v1/payments")
 public class PaymentController {
     private static final Logger logger = LoggerFactory.getLogger(PaymentController.class);
-    
+
     private final PaymentService paymentService;
     private final IdempotencyService idempotencyService;
     private final SecurityService securityService;
     private final ObjectMapper objectMapper;
-    
-    public PaymentController(PaymentService paymentService, 
-                           IdempotencyService idempotencyService,
-                           SecurityService securityService,
-                           ObjectMapper objectMapper) {
+
+    public PaymentController(PaymentService paymentService,
+                             IdempotencyService idempotencyService,
+                             SecurityService securityService,
+                             ObjectMapper objectMapper) {
         this.paymentService = paymentService;
         this.idempotencyService = idempotencyService;
         this.securityService = securityService;
         this.objectMapper = objectMapper;
     }
-    
+
     @PostMapping
     public ResponseEntity<?> createPayment(
             @RequestHeader("X-API-Key") String apiKey,
@@ -46,40 +48,31 @@ public class PaymentController {
         // Validate API key
         if (!securityService.isValidApiKey(apiKey)) {
             logger.warn("Unauthorized API key attempt from: {}", httpRequest.getRemoteAddr());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            throw new UnauthorizedException("Unauthorized access. Please check your credentials.");
         }
-        
+
         // Validate idempotency key
         if (idempotencyKey == null || idempotencyKey.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body("Idempotency-Key header is required");
+            throw new BadRequestException("Idempotency-Key header is required");
         }
 
         PaymentResponse response = paymentService.createPayment(request, idempotencyKey);
         return ResponseEntity.ok(response);
     }
-    
+
     @GetMapping("/{paymentId}")
     public ResponseEntity<?> getPayment(
             @RequestHeader("X-API-Key") String apiKey,
             @PathVariable String paymentId,
             HttpServletRequest httpRequest) {
-        
+
         // Validate API key
         if (!securityService.isValidApiKey(apiKey)) {
             logger.warn("Unauthorized API key attempt from: {}", httpRequest.getRemoteAddr());
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            throw new UnauthorizedException("Unauthorized access. Please check your credentials.");
         }
-        
-        try {
-            PaymentResponse response = paymentService.getPayment(paymentId);
-            return ResponseEntity.ok(response);
-        } catch (RuntimeException e) {
-            logger.warn("Payment not found: {}", paymentId);
-            return ResponseEntity.notFound().build();
-        } catch (Exception e) {
-            logger.error("Error retrieving payment: {}", paymentId, e);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error retrieving payment");
-        }
+        PaymentResponse response = paymentService.getPayment(paymentId);
+        return ResponseEntity.ok(response);
+
     }
 }

@@ -6,11 +6,15 @@ import com.onafriq.paylite.service.paylite_service.dto.PaymentRequest;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentResponse;
 import com.onafriq.paylite.service.paylite_service.entity.Payment;
 import com.onafriq.paylite.service.paylite_service.enums.PaymentStatus;
+import com.onafriq.paylite.service.paylite_service.exception.IdempotencyConflictException;
+import com.onafriq.paylite.service.paylite_service.exception.PaymentIdGenerationException;
+import com.onafriq.paylite.service.paylite_service.exception.PaymentNotFoundException;
 import com.onafriq.paylite.service.paylite_service.repository.PaymentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.util.UUID;
 
 import static com.onafriq.paylite.service.paylite_service.config.AppConstants.PAYMENT_ID_PREFIX;
@@ -23,16 +27,16 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final IdempotencyService idempotencyService;
 
-    private final  ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
-    public PaymentService(PaymentRepository paymentRepository, IdempotencyService idempotencyService,  ObjectMapper objectMapper) {
+    public PaymentService(PaymentRepository paymentRepository, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
         this.paymentRepository = paymentRepository;
         this.idempotencyService = idempotencyService;
         this.objectMapper = objectMapper;
     }
 
     @Transactional
-    public PaymentResponse createPayment(PaymentRequest request, String idempotencyKey) throws Exception {
+    public PaymentResponse createPayment(PaymentRequest request, String idempotencyKey) throws JsonProcessingException {
         String requestHash = idempotencyService.calculateRequestHash(request);
 
         // Check for existing response
@@ -43,7 +47,7 @@ public class PaymentService {
 
         // Check for conflict
         if (idempotencyService.hasConflict(idempotencyKey, requestHash)) {
-            throw new Exception("Idempotency-Key already used with different request");
+            throw new IdempotencyConflictException("Idempotency-Key already used with different request");
         }
 
         String paymentId = generatePaymentId();
@@ -67,7 +71,8 @@ public class PaymentService {
 
     public PaymentResponse getPayment(String paymentId) {
         Payment payment = paymentRepository.findByPaymentId(paymentId)
-                .orElseThrow(() -> new RuntimeException("Payment not found"));
+                .orElseThrow(() -> new PaymentNotFoundException(
+                        String.format("Payment with ID '%s' not found", paymentId)));
 
         return new PaymentResponse(
                 payment.getPaymentId(),
@@ -82,7 +87,8 @@ public class PaymentService {
     @Transactional
     public void processWebhook(String paymentId, String event) {
         Payment payment = paymentRepository.findByPaymentIdForUpdate(paymentId)
-                .orElseThrow(() -> new RuntimeException("Payment not found"));
+                .orElseThrow(() -> new PaymentNotFoundException(
+                        String.format("Payment with ID '%s' not found", paymentId)));
 
         String newStatus = WEBHOOK_EVENT_SUCCEEDED.equals(event) ? PaymentStatus.SUCCEEDED.toString() : PaymentStatus.FAILED.toString();
 
@@ -104,7 +110,7 @@ public class PaymentService {
             attempts++;
 
             if (attempts > 5) {
-                throw new RuntimeException("Failed to generate unique payment ID after 5 attempts");
+                throw new PaymentIdGenerationException("Failed to generate unique payment ID after 5 attempts");
             }
         } while (paymentRepository.existsByPaymentId(paymentId));
 

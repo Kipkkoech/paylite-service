@@ -2,6 +2,8 @@ package com.onafriq.paylite.service.paylite_service.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onafriq.paylite.service.paylite_service.dto.WebhookRequest;
+import com.onafriq.paylite.service.paylite_service.exception.InvalidWebhookPayloadException;
+import com.onafriq.paylite.service.paylite_service.exception.UnauthorizedException;
 import com.onafriq.paylite.service.paylite_service.service.PaymentService;
 import com.onafriq.paylite.service.paylite_service.service.SecurityService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,36 +46,20 @@ public class WebhookController {
         // Validate signature
         if (!securityService.verifyWebhookSignature(signature, rawBody)) {
             logger.warn("Invalid webhook signature");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            throw new UnauthorizedException("Invalid webhook signature");
         }
 
         try {
             // Parse JSON using ObjectMapper
             WebhookRequest request = objectMapper.readValue(rawBody, WebhookRequest.class);
-
-            if (request.getPaymentId() == null || request.getPaymentId().isEmpty() ||
-                    request.getEvent() == null || request.getEvent().isEmpty()) {
-                logger.warn("Invalid webhook payload - missing required fields");
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
-            }
-
             logger.info("Processing webhook for payment: {}, event: {}", request.getPaymentId(), request.getEvent());
 
             paymentService.processWebhook(request.getPaymentId(), request.getEvent());
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             logger.error("Error processing webhook", e);
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+            throw new InvalidWebhookPayloadException("Invalid JSON payload", e);
         }
     }
 
-    private String getRawRequestBody(HttpServletRequest request) {
-        try {
-            BufferedReader reader = request.getReader();
-            return reader.lines().collect(Collectors.joining(System.lineSeparator()));
-        } catch (IOException e) {
-            logger.error("Error reading request body", e);
-            return "";
-        }
-    }
 }
