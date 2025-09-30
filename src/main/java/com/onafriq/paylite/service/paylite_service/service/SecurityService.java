@@ -48,6 +48,7 @@ public class SecurityService {
         
         try {
             String computedSignature = computeHmacSha256(payload, webhookSecret);
+            logger.info("computedSignature {}, received signature {}", computedSignature, signature );
             return computedSignature.equals(signature);
         } catch (Exception e) {
             logger.error("Error verifying webhook signature", e);

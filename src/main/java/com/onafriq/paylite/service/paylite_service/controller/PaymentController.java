@@ -41,7 +41,8 @@ public class PaymentController {
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody PaymentRequest request,
             HttpServletRequest httpRequest) {
-        
+
+        logger.warn("Starting create payment: {}", httpRequest.getRemoteAddr());
         // Validate API key
         if (!securityService.isValidApiKey(apiKey)) {
             logger.warn("Unauthorized API key attempt from: {}", httpRequest.getRemoteAddr());
