@@ -4,14 +4,18 @@ package com.onafriq.paylite.service.paylite_service.controller;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentRequest;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentResponse;
 import com.onafriq.paylite.service.paylite_service.exception.BadRequestException;
+import com.onafriq.paylite.service.paylite_service.exception.ErrorResponse;
+import com.onafriq.paylite.service.paylite_service.exception.RateLimitExceedeException;
 import com.onafriq.paylite.service.paylite_service.exception.UnauthorizedException;
 import com.onafriq.paylite.service.paylite_service.service.IdempotencyService;
 import com.onafriq.paylite.service.paylite_service.service.PaymentService;
+import com.onafriq.paylite.service.paylite_service.service.RateLimiterService;
 import com.onafriq.paylite.service.paylite_service.service.SecurityService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +30,8 @@ public class PaymentController {
     private final IdempotencyService idempotencyService;
     private final SecurityService securityService;
     private final ObjectMapper objectMapper;
+    @Autowired
+    private RateLimiterService rateLimiter;
 
     public PaymentController(PaymentService paymentService,
                              IdempotencyService idempotencyService,
@@ -54,6 +60,11 @@ public class PaymentController {
         // Validate idempotency key
         if (idempotencyKey == null || idempotencyKey.trim().isEmpty()) {
             throw new BadRequestException("Idempotency-Key header is required");
+        }
+
+        if (!rateLimiter.allowRequest(httpRequest.getRemoteAddr())) {
+            long resetTime = rateLimiter.getResetTime(httpRequest.getRemoteAddr());
+            throw new RateLimitExceedeException("Rate limit exceeded. Try again later");
         }
 
         PaymentResponse response = paymentService.createPayment(request, idempotencyKey);

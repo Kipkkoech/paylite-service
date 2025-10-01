@@ -87,4 +87,15 @@ public class GlobalExceptionHandler {
         );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
     }
+
+    @ExceptionHandler(RateLimitExceedeException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentIdGeneration(RateLimitExceedeException ex) {
+        logger.error("Rate limit exceeded. Try again later: {}", ex.getMessage());
+        ErrorResponse errorResponse = new ErrorResponse(
+                "Rate limit exceeded. Try again later",
+                HttpStatus.TOO_MANY_REQUESTS.value(),
+                "rate_limit_exceeded"
+        );
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(errorResponse);
+    }
 }
