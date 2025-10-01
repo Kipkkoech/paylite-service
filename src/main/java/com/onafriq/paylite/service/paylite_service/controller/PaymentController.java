@@ -21,6 +21,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.sql.SQLTransientException;
+
 @RestController
 @RequestMapping("/api/v1/payments")
 public class PaymentController {
@@ -75,7 +77,7 @@ public class PaymentController {
     public ResponseEntity<?> getPayment(
             @RequestHeader("X-API-Key") String apiKey,
             @PathVariable String paymentId,
-            HttpServletRequest httpRequest) {
+            HttpServletRequest httpRequest) throws SQLTransientException {
 
         // Validate API key
         if (!securityService.isValidApiKey(apiKey)) {

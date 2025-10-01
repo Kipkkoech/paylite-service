@@ -10,11 +10,14 @@ import com.onafriq.paylite.service.paylite_service.exception.IdempotencyConflict
 import com.onafriq.paylite.service.paylite_service.exception.PaymentIdGenerationException;
 import com.onafriq.paylite.service.paylite_service.exception.PaymentNotFoundException;
 import com.onafriq.paylite.service.paylite_service.repository.PaymentRepository;
+import com.onafriq.paylite.service.paylite_service.retry.RetryableOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.SQLTransientException;
 import java.util.UUID;
 
 import static com.onafriq.paylite.service.paylite_service.config.AppConstants.PAYMENT_ID_PREFIX;
@@ -28,11 +31,14 @@ public class PaymentService {
     private final IdempotencyService idempotencyService;
 
     private final ObjectMapper objectMapper;
+    private final RetryTemplate retryTemplate;
+    private int attempts = 0;
 
-    public PaymentService(PaymentRepository paymentRepository, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
+    public PaymentService(PaymentRepository paymentRepository, IdempotencyService idempotencyService, ObjectMapper objectMapper, RetryTemplate retryTemplate) {
         this.paymentRepository = paymentRepository;
         this.idempotencyService = idempotencyService;
         this.objectMapper = objectMapper;
+        this.retryTemplate = retryTemplate;
     }
 
     @Transactional
@@ -69,36 +75,46 @@ public class PaymentService {
                 .build();
     }
 
-    public PaymentResponse getPayment(String paymentId) {
-        Payment payment = paymentRepository.findByPaymentId(paymentId)
-                .orElseThrow(() -> new PaymentNotFoundException(
-                        String.format("Payment with ID '%s' not found", paymentId)));
+    @RetryableOperation
+    public PaymentResponse getPayment(String paymentId) throws SQLTransientException {
+        return retryTemplate.execute(context -> {
+            attempts++;
+            if (attempts < 3) {
+                throw new SQLTransientException("Simulated transient failure on attempt " + attempts);
+            }
+            Payment payment = paymentRepository.findByPaymentId(paymentId)
+                    .orElseThrow(() -> new PaymentNotFoundException(
+                            String.format("Payment with ID '%s' not found", paymentId)));
 
-        return new PaymentResponse(
-                payment.getPaymentId(),
-                payment.getStatus(),
-                payment.getAmount(),
-                payment.getCurrency(),
-                payment.getReference(),
-                payment.getCustomerEmail()
-        );
+            return new PaymentResponse(
+                    payment.getPaymentId(),
+                    payment.getStatus(),
+                    payment.getAmount(),
+                    payment.getCurrency(),
+                    payment.getReference(),
+                    payment.getCustomerEmail()
+            );
+        });
     }
 
     @Transactional
     public void processWebhook(String paymentId, String event) {
-        Payment payment = paymentRepository.findByPaymentIdForUpdate(paymentId)
-                .orElseThrow(() -> new PaymentNotFoundException(
-                        String.format("Payment with ID '%s' not found", paymentId)));
+        retryTemplate.execute(context -> {
+            Payment payment = paymentRepository.findByPaymentIdForUpdate(paymentId)
+                    .orElseThrow(() -> new PaymentNotFoundException(
+                            String.format("Payment with ID '%s' not found", paymentId)));
 
-        String newStatus = WEBHOOK_EVENT_SUCCEEDED.equals(event) ? PaymentStatus.SUCCEEDED.toString() : PaymentStatus.FAILED.toString();
+            String newStatus = WEBHOOK_EVENT_SUCCEEDED.equals(event) ? PaymentStatus.SUCCEEDED.toString() : PaymentStatus.FAILED.toString();
 
-        if (!PaymentStatus.SUCCEEDED.toString().equals(payment.getStatus()) && !PaymentStatus.FAILED.toString().equals(payment.getStatus())) {
-            payment.setStatus(newStatus);
-            paymentRepository.save(payment);
-            logger.info("Updated payment {} status to {}", paymentId, newStatus);
-        } else {
-            logger.info("Payment {} already in final status: {}", paymentId, payment.getStatus());
-        }
+            if (!PaymentStatus.SUCCEEDED.toString().equals(payment.getStatus()) && !PaymentStatus.FAILED.toString().equals(payment.getStatus())) {
+                payment.setStatus(newStatus);
+                paymentRepository.save(payment);
+                logger.info("Updated payment {} status to {}", paymentId, newStatus);
+            } else {
+                logger.info("Payment {} already in final status: {}", paymentId, payment.getStatus());
+            }
+            return null;
+        });
     }
 
     private String generatePaymentId() {

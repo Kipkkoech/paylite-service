@@ -1,8 +1,11 @@
 package com.onafriq.paylite.service.paylite_service.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onafriq.paylite.service.paylite_service.dto.WebhookRequest;
 import com.onafriq.paylite.service.paylite_service.exception.InvalidWebhookPayloadException;
+import com.onafriq.paylite.service.paylite_service.exception.PaymentIdGenerationException;
+import com.onafriq.paylite.service.paylite_service.exception.PaymentNotFoundException;
 import com.onafriq.paylite.service.paylite_service.exception.UnauthorizedException;
 import com.onafriq.paylite.service.paylite_service.service.PaymentService;
 import com.onafriq.paylite.service.paylite_service.service.SecurityService;
@@ -49,16 +52,21 @@ public class WebhookController {
             throw new UnauthorizedException("Invalid webhook signature");
         }
 
+        WebhookRequest request =new WebhookRequest();
         try {
             // Parse JSON using ObjectMapper
-            WebhookRequest request = objectMapper.readValue(rawBody, WebhookRequest.class);
+            request= objectMapper.readValue(rawBody, WebhookRequest.class);
             logger.info("Processing webhook for payment: {}, event: {}", request.getPaymentId(), request.getEvent());
 
             paymentService.processWebhook(request.getPaymentId(), request.getEvent());
             return ResponseEntity.ok().build();
-        } catch (Exception e) {
+        } catch (InvalidWebhookPayloadException | JsonProcessingException e) {
             logger.error("Error processing webhook", e);
             throw new InvalidWebhookPayloadException("Invalid JSON payload", e);
+        }
+        catch (PaymentNotFoundException e) {
+            logger.error("Error processing webhook", e);
+            throw new PaymentNotFoundException(String.format("Payment with ID '%s' not found", request.getPaymentId()));
         }
     }
 
