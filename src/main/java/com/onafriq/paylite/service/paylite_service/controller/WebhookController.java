@@ -9,6 +9,7 @@ import com.onafriq.paylite.service.paylite_service.exception.PaymentNotFoundExce
 import com.onafriq.paylite.service.paylite_service.exception.UnauthorizedException;
 import com.onafriq.paylite.service.paylite_service.service.PaymentService;
 import com.onafriq.paylite.service.paylite_service.service.SecurityService;
+import com.onafriq.paylite.service.paylite_service.service.WebhookService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,7 +30,7 @@ public class WebhookController {
     private static final String SIGNATURE_HEADER = "X-PSP-Signature";
 
     @Autowired
-    private PaymentService paymentService;
+    private WebhookService webhookService;
 
     @Autowired
     private SecurityService securityService;
@@ -58,7 +59,7 @@ public class WebhookController {
             request= objectMapper.readValue(rawBody, WebhookRequest.class);
             logger.info("Processing webhook for payment: {}, event: {}", request.getPaymentId(), request.getEvent());
 
-            paymentService.processWebhook(request.getPaymentId(), request.getEvent());
+            webhookService.processWebhook(request, rawBody, httpRequest);
             return ResponseEntity.ok().build();
         } catch (InvalidWebhookPayloadException | JsonProcessingException e) {
             logger.error("Error processing webhook", e);
