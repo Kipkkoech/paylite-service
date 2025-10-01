@@ -2,9 +2,9 @@ spring:
   application:
     name: paylite
   datasource:
-    url: jdbc:mysql://${PAYLITE_DB_HOST}:3306/${MYSQL_DATABASE}
-    username: ${PAYLITE_DB_USERNAME}
-    password: ${PAYLITE_DB_PASSWORD}
+    url: jdbc:mysql://${PAYLITE_DB_HOST:localhost}:3306/${MYSQL_DATABASE:paylite}
+    username: ${PAYLITE_DB_USERNAME:root}
+    password: ${PAYLITE_DB_PASSWORD:password}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -25,7 +25,6 @@ logging:
     com.zaxxer.hikari: INFO
     org.springframework: ERROR
 
-
 management:
   endpoints:
     web:
@@ -34,6 +33,7 @@ management:
   endpoint:
     health:
       show-details: always
+
 app:
-  api-keys: ${API_KEYS}
-  webhook-secret: {WEBHOOK_SECRET}
+  api-keys: ${API_KEYS:default-api-key}
+  webhook-secret: ${WEBHOOK_SECRET:default-webhook-secret}

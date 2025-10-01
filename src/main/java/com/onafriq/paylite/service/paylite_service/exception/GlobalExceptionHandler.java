@@ -98,4 +98,14 @@ public class GlobalExceptionHandler {
         );
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(errorResponse);
     }
+    @ExceptionHandler(HashCalculationException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentIdGeneration(HashCalculationException ex) {
+        logger.error("An error occured during hash calculation: {}", ex.getMessage());
+        ErrorResponse errorResponse = new ErrorResponse(
+                "An error occured during hash calculation:",
+                HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                "hash_calculation_exception"
+        );
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
+    }
 }

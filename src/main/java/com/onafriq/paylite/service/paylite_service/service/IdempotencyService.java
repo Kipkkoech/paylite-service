@@ -1,6 +1,7 @@
 package com.onafriq.paylite.service.paylite_service.service;
 
 import com.onafriq.paylite.service.paylite_service.entity.IdempotencyKey;
+import com.onafriq.paylite.service.paylite_service.exception.HashCalculationException;
 import com.onafriq.paylite.service.paylite_service.repository.IdempotencyKeyRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +33,7 @@ public class IdempotencyService {
             byte[] hash = digest.digest(requestString.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash);
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Failed to calculate request hash", e);
+            throw new HashCalculationException("Failed to calculate request hash", e);
         }
     }
     
@@ -44,7 +45,7 @@ public class IdempotencyService {
                     .map(IdempotencyKey::getResponseBody);
         }, context -> {
             // Recovery logic if retries exhausted
-            throw new RuntimeException("Failed to retrieve idempotency key after retries", context.getLastThrowable());
+            throw new HashCalculationException("Failed to retrieve idempotency key after retries", context.getLastThrowable());
         });
     }
     
@@ -63,7 +64,7 @@ public class IdempotencyService {
             logger.info("Stored idempotency key for payment: {}", paymentId);
             return null; // must return something since callback has return type
         }, context -> {
-            throw new RuntimeException(
+            throw new HashCalculationException(
                     "Failed to store idempotency key [" + idempotencyKey + "] after retries",
                     context.getLastThrowable()
             );

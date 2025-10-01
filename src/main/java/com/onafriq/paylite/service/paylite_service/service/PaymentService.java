@@ -10,7 +10,6 @@ import com.onafriq.paylite.service.paylite_service.exception.IdempotencyConflict
 import com.onafriq.paylite.service.paylite_service.exception.PaymentIdGenerationException;
 import com.onafriq.paylite.service.paylite_service.exception.PaymentNotFoundException;
 import com.onafriq.paylite.service.paylite_service.repository.PaymentRepository;
-import com.onafriq.paylite.service.paylite_service.retry.RetryableOperation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.retry.support.RetryTemplate;
@@ -32,7 +31,6 @@ public class PaymentService {
 
     private final ObjectMapper objectMapper;
     private final RetryTemplate retryTemplate;
-    private int attempts = 0;
 
     public PaymentService(PaymentRepository paymentRepository, IdempotencyService idempotencyService, ObjectMapper objectMapper, RetryTemplate retryTemplate) {
         this.paymentRepository = paymentRepository;
@@ -75,13 +73,8 @@ public class PaymentService {
                 .build();
     }
 
-    @RetryableOperation
     public PaymentResponse getPayment(String paymentId) throws SQLTransientException {
         return retryTemplate.execute(context -> {
-            attempts++;
-            if (attempts < 3) {
-                throw new SQLTransientException("Simulated transient failure on attempt " + attempts);
-            }
             Payment payment = paymentRepository.findByPaymentId(paymentId)
                     .orElseThrow(() -> new PaymentNotFoundException(
                             String.format("Payment with ID '%s' not found", paymentId)));

@@ -78,7 +78,7 @@ public class RetryConfig {
         return new SimpleRetryPolicy(3, retryableExceptions);
     }
 
-    private ExponentialBackOffPolicy exponentialBackOffPolicy() {
+   public ExponentialBackOffPolicy exponentialBackOffPolicy() {
         ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
         backOffPolicy.setInitialInterval(100);
         backOffPolicy.setMultiplier(2.0);
