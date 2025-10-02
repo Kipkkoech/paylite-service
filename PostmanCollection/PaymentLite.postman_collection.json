@@ -1,0 +1,349 @@
+{
+	"info": {
+		"_postman_id": "a81942d3-49b1-48f3-8749-c388e5ae3fcc",
+		"name": "PaymentLite",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "39939184"
+	},
+	"item": [
+		{
+			"name": "Create Payment (Dynamic UUID)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test(\"Payment created successfully\", function () {",
+							"    pm.response.to.have.status(200);",
+							"    const jsonData = pm.response.json();",
+							"    pm.expect(jsonData.paymentId).to.be.a('string');",
+							"    pm.expect(jsonData.status).to.eql('PENDING');",
+							"    pm.collectionVariables.set(\"paymentId\", jsonData.paymentId);",
+							"    console.log(\"Created payment:\", jsonData.paymentId);",
+							"});"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Idempotency-Key",
+						"value": "5689b1fe-49da-43d6-b1bf-ed789c9aca33",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"amount\": 1999,\n    \"currency\": \"KES\",\n    \"customerEmail\": \"customer@example.com\",\n    \"reference\": \"INV-2025-0001\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/payments",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"payments"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "PSP Webhook – Succeeded-200",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"// Enhanced webhook signature generator for Postman",
+							"function generateWebhookSignature(payload, secret) {",
+							"    try {",
+							"        const signature = CryptoJS.HmacSHA256(payload, secret);",
+							"        return CryptoJS.enc.Base64.stringify(signature);",
+							"    } catch (error) {",
+							"        throw new Error(`Signature generation failed: ${error.message}`);",
+							"    }",
+							"}",
+							"",
+							"// Check if this is a webhook request",
+							"const requestUrl = pm.request.url.toString();",
+							"",
+							"if (requestUrl.includes('/webhooks/psp')) {",
+							"    console.log('🔐 Processing webhook request...');",
+							"    ",
+							"    // Get webhook secret",
+							"    const webhookSecret = pm.collectionVariables.get('webhookSecret');",
+							"    ",
+							"    if (!webhookSecret) {",
+							"        console.log('❌ Webhook secret not found in collection variables');",
+							"        console.log('💡 Set it with: pm.collectionVariables.set(\"webhookSecret\", \"your-secret\")');",
+							"        return;",
+							"    }",
+							"    ",
+							"    // Get request body",
+							"    let rawBody = '';",
+							"    ",
+							"    if (pm.request.body) {",
+							"        if (pm.request.body.mode === 'raw') {",
+							"            rawBody = pm.request.body.raw || '';",
+							"        } else if (pm.request.body.mode === 'graphql') {",
+							"            rawBody = pm.request.body.graphql || '';",
+							"        } else {",
+							"            console.log('⚠️ Warning: Body mode is not \"raw\" or \"graphql\"');",
+							"            rawBody = pm.request.body.toString() || '';",
+							"        }",
+							"    }",
+							"    ",
+							"    if (!rawBody) {",
+							"        console.log('❌ Request body is empty - cannot generate signature');",
+							"        return;",
+							"    }",
+							"    ",
+							"    // Validate content type",
+							"    const contentType = pm.request.headers.get('Content-Type');",
+							"    if (!contentType) {",
+							"        console.log('⚠️ Warning: No Content-Type header set');",
+							"    }",
+							"    ",
+							"    try {",
+							"        // Generate signature",
+							"        const signature = generateWebhookSignature(rawBody, webhookSecret);",
+							"        ",
+							"        // Store in collection variable",
+							"        pm.collectionVariables.set('webhookSignature', signature);",
+							"        ",
+							"        // Add signature to request headers",
+							"        pm.request.headers.upsert({",
+							"            key: 'X-Webhook-Signature',",
+							"            value: signature",
+							"        });",
+							"        ",
+							"        // Log success with details",
+							"        console.log('✅ Webhook signature generated and added to headers');",
+							"        console.log('📝 Signature:', signature);",
+							"        console.log('📦 Payload length:', rawBody.length, 'bytes');",
+							"        console.log('🔑 Secret length:', webhookSecret.length, 'characters');",
+							"        ",
+							"        // Optional: Log first 100 chars of payload for debugging",
+							"        if (rawBody.length > 100) {",
+							"            console.log('📄 Payload preview:', rawBody.substring(0, 100) + '...');",
+							"        } else {",
+							"            console.log('📄 Payload:', rawBody);",
+							"        }",
+							"        ",
+							"    } catch (error) {",
+							"        console.log('❌ Error generating webhook signature:', error.message);",
+							"    }",
+							"    ",
+							"} else {",
+							"    console.log('ℹ️ Not a webhook request - skipping signature generation');",
+							"}"
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript",
+						"packages": {},
+						"requests": {}
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Idempotency-Key",
+						"value": "{{idempotency_key}}",
+						"type": "text"
+					},
+					{
+						"key": "X-PSP-Signature",
+						"value": "{{webhookSignature}}",
+						"type": "text"
+					},
+					{
+						"key": "webhookSecret",
+						"value": "{{webhookSecret}}",
+						"type": "text"
+					},
+					{
+						"key": "webhookSignature",
+						"value": "",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"paymentId\": \"{{paymentId}}\",\n  \"event\": \"payment.succeeded\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{base_url}}/api/v1/webhooks/psp",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"webhooks",
+						"psp"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Get Payment by ID (Valid)",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/v1/payments/pl_9202c28a",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"payments",
+						"pl_9202c28a"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Health Check",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "{{api_key}}",
+						"type": "text"
+					},
+					{
+						"key": "Idempotency-Key",
+						"value": "5689b1fe-49da-43d6-b1bf-ed789c9aca33",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"amount\": 1999,\n    \"currency\": \"KES\",\n    \"customerEmail\": \"customer@example.com\",\n    \"reference\": \"INV-2025-0001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/actuator/health",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"actuator",
+						"health"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"packages": {},
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "webhookSecret",
+			"value": ""
+		},
+		{
+			"key": "webhookSignature",
+			"value": ""
+		},
+		{
+			"key": "paymentId",
+			"value": ""
+		},
+		{
+			"key": "paymentId2",
+			"value": ""
+		},
+		{
+			"key": "base_url",
+			"value": ""
+		},
+		{
+			"key": "api_key",
+			"value": ""
+		},
+		{
+			"key": "idempodency_key",
+			"value": ""
+		},
+		{
+			"value": ""
+		}
+	]
+}
