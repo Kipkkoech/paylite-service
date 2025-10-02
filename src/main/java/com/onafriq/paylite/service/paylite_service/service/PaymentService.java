@@ -4,11 +4,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentRequest;
 import com.onafriq.paylite.service.paylite_service.dto.PaymentResponse;
+import com.onafriq.paylite.service.paylite_service.entity.IdempotencyKey;
 import com.onafriq.paylite.service.paylite_service.entity.Payment;
 import com.onafriq.paylite.service.paylite_service.enums.PaymentStatus;
 import com.onafriq.paylite.service.paylite_service.exception.IdempotencyConflictException;
 import com.onafriq.paylite.service.paylite_service.exception.PaymentIdGenerationException;
 import com.onafriq.paylite.service.paylite_service.exception.PaymentNotFoundException;
+import com.onafriq.paylite.service.paylite_service.repository.IdempotencyKeyRepository;
 import com.onafriq.paylite.service.paylite_service.repository.PaymentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +69,12 @@ public class PaymentService {
 
         paymentRepository.save(payment);
         logger.info("Created payment with ID: {}", paymentId);
+
+        // Store idempotency key with response
+        String responseBody = String.format("{\"paymentId\":\"%s\",\"status\":\"PENDING\"}", paymentId);
+
+        idempotencyService.storeIdempotencyKey(idempotencyKey,requestHash, responseBody, paymentId);
+        logger.info("Stored idempotency key for payment: {}", paymentId);
 
         return PaymentResponse.builder().paymentId(paymentId)
                 .status(PaymentStatus.PENDING.toString())

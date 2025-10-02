@@ -28,16 +28,19 @@ public class SecurityService {
     
     public boolean isValidApiKey(String apiKey) {
         if (apiKey == null || apiKey.trim().isEmpty()) {
+            logger.warn("No api Key set");
             return false;
         }
         
         for (String validKey : validApiKeys) {
+            logger.warn("set api key: {}", validKey);
             if (validKey.equals(apiKey)) {
+
                 return true;
             }
         }
         
-        logger.warn("Invalid API key attempted: {}", apiKey);
+        logger.warn("Invalid API key attempted");
         return false;
     }
     

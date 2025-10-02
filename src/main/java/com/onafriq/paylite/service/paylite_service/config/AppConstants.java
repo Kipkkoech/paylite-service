@@ -16,9 +16,12 @@ public final class AppConstants {
     public static final String API_KEY_HEADER = "X-API-Key";
     public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
     public static final String WEBHOOK_SIGNATURE_HEADER = "X-PSP-Signature";
-    public static final String CORRELATION_ID_HEADER = "X-Correlation-ID";
 
     //    Rate limiting
     public static final int MAX_REQUESTS = 5; // requests per window
     public static final long WINDOW_SIZE_SECONDS = 60; // 1 minute window
+
+//    logging
+    public static final String CORRELATION_ID_HEADER = "X-Correlation-Id";
+    public static final String MDC_CORRELATION_ID_KEY = "correlationId";
 }

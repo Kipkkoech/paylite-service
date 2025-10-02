@@ -10,7 +10,9 @@ import java.util.Optional;
 @Repository
 public interface WebhookEventRepository extends JpaRepository<WebhookEvent, Long> {
     Optional<WebhookEvent> findByEventId(String eventId);
-    boolean existsByEventId(String eventId);
+    boolean existsByPaymentId(String paymentId);
     boolean existsByPaymentIdAndEventType(String paymentId, String eventType);
     List<WebhookEvent> findByPaymentIdOrderByProcessedAtDesc(String paymentId);
+    WebhookEvent findByPaymentId(String paymentId);
+    WebhookEvent findByPaymentIdAndEventType(String paymentId, String eventType);
 }

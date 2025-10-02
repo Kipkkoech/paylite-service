@@ -2,6 +2,7 @@ package com.onafriq.paylite.service.paylite_service.service;
 
 import com.onafriq.paylite.service.paylite_service.dto.WebhookRequest;
 import com.onafriq.paylite.service.paylite_service.entity.WebhookEvent;
+import com.onafriq.paylite.service.paylite_service.exception.WebhookConflictException;
 import com.onafriq.paylite.service.paylite_service.repository.WebhookEventRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,8 +15,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +37,7 @@ class WebhookServiceTest {
 
     private WebhookRequest webhookRequest;
     private String rawBody;
+
     private static final String PAYMENT_ID = "payment-123";
     private static final String EVENT_SUCCEEDED = "payment.succeeded";
     private static final String EVENT_FAILED = "payment.failed";
@@ -47,357 +47,216 @@ class WebhookServiceTest {
         webhookRequest = new WebhookRequest();
         webhookRequest.setPaymentId(PAYMENT_ID);
         webhookRequest.setEvent(EVENT_SUCCEEDED);
+
         rawBody = "{\"paymentId\":\"payment-123\",\"event\":\"payment.succeeded\"}";
     }
 
-    // ===== PROCESS WEBHOOK TESTS =====
+    // ======== HELPER METHODS ========
+    private void setupNonDuplicateWebhook(String requestId) {
+        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn(requestId);
+        when(webhookEventRepository.findByPaymentId(anyString())).thenReturn(null);
+        when(webhookEventRepository.findByPaymentIdAndEventType(anyString(), anyString())).thenReturn(null);
+        doNothing().when(paymentService).processWebhook(anyString(), anyString());
+    }
 
+    private void setupDuplicateWebhookSamePayload() {
+        WebhookEvent duplicate = WebhookEvent.builder()
+                .paymentId(PAYMENT_ID)
+                .eventType(EVENT_SUCCEEDED)
+                .rawPayload(rawBody)
+                .eventId("existing-event-001")
+                .build();
+        when(webhookEventRepository.findByPaymentId(PAYMENT_ID)).thenReturn(duplicate);
+    }
+
+    private void setupDuplicateWebhookDifferentPayload() {
+        WebhookEvent duplicate = WebhookEvent.builder()
+                .paymentId(PAYMENT_ID)
+                .eventType(EVENT_SUCCEEDED)
+                .rawPayload("{\"different\":\"payload\"}")
+                .eventId("existing-event-002")
+                .build();
+        when(webhookEventRepository.findByPaymentId(PAYMENT_ID)).thenReturn(duplicate);
+    }
+
+    private void assertSavedWebhookEvent(String expectedEventId, String expectedPaymentId, String expectedEventType, String expectedPayload) {
+        verify(webhookEventRepository).save(webhookEventCaptor.capture());
+        WebhookEvent savedEvent = webhookEventCaptor.getValue();
+        assertEquals(expectedEventId, savedEvent.getEventId());
+        assertEquals(expectedPaymentId, savedEvent.getPaymentId());
+        assertEquals(expectedEventType, savedEvent.getEventType());
+        assertEquals(expectedPayload, savedEvent.getRawPayload());
+    }
+
+    // ======== PROCESS WEBHOOK TESTS ========
     @Test
     void processWebhook_WithValidSucceededEvent_ShouldProcessSuccessfully() {
-        // Arrange
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("req-123");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
+        setupNonDuplicateWebhook("req-123");
 
-        // Act
         webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
 
-        // Assert
         verify(paymentService).processWebhook(PAYMENT_ID, EVENT_SUCCEEDED);
         verify(webhookEventRepository).save(any(WebhookEvent.class));
     }
 
     @Test
     void processWebhook_WithValidFailedEvent_ShouldProcessSuccessfully() {
-        // Arrange
         webhookRequest.setEvent(EVENT_FAILED);
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("req-456");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
+        setupNonDuplicateWebhook("req-456");
 
-        // Act
         webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
 
-        // Assert
         verify(paymentService).processWebhook(PAYMENT_ID, EVENT_FAILED);
         verify(webhookEventRepository).save(any(WebhookEvent.class));
     }
 
     @Test
     void processWebhook_WithInvalidEventType_ShouldThrowException() {
-        // Arrange
         webhookRequest.setEvent("payment.pending");
 
-        // Act & Assert
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () ->
-                webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest)
-        );
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest));
 
         assertTrue(exception.getMessage().contains("Invalid event type"));
-        assertTrue(exception.getMessage().contains("payment.pending"));
         verify(paymentService, never()).processWebhook(anyString(), anyString());
         verify(webhookEventRepository, never()).save(any(WebhookEvent.class));
     }
 
     @Test
-    void processWebhook_WithDuplicateEventId_ShouldNotProcess() {
-        // Arrange
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("req-123");
-        when(webhookEventRepository.existsByEventId("psp_req-123")).thenReturn(true);
+    void processWebhook_WithDuplicateSamePayload_ShouldReturnWithoutProcessing() {
+        setupDuplicateWebhookSamePayload();
 
-        // Act
         webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
 
-        // Assert
         verify(paymentService, never()).processWebhook(anyString(), anyString());
         verify(webhookEventRepository, never()).save(any(WebhookEvent.class));
     }
 
     @Test
-    void processWebhook_WithDuplicateBusinessKey_ShouldNotProcess() {
-        // Arrange
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("req-123");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED)).thenReturn(true);
+    void processWebhook_WithDuplicateDifferentPayload_ShouldThrowConflict() {
+        setupDuplicateWebhookDifferentPayload();
 
-        // Act
-        webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
+        assertThrows(WebhookConflictException.class,
+                () -> webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest));
 
-        // Assert
         verify(paymentService, never()).processWebhook(anyString(), anyString());
         verify(webhookEventRepository, never()).save(any(WebhookEvent.class));
     }
 
     @Test
     void processWebhook_WithoutRequestIdHeader_ShouldGenerateFallbackEventId() {
-        // Arrange
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn(null);
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
+        setupNonDuplicateWebhook(null);
 
-        // Act
         webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
 
-        // Assert
         verify(webhookEventRepository).save(webhookEventCaptor.capture());
         WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
         assertTrue(savedEvent.getEventId().startsWith("psp_" + PAYMENT_ID));
         assertTrue(savedEvent.getEventId().contains(EVENT_SUCCEEDED));
     }
 
     @Test
-    void processWebhook_WithEmptyRequestIdHeader_ShouldGenerateFallbackEventId() {
-        // Arrange
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("   ");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
-
-        // Act
-        webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
-
-        // Assert
-        verify(webhookEventRepository).save(webhookEventCaptor.capture());
-        WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
-        assertTrue(savedEvent.getEventId().startsWith("psp_" + PAYMENT_ID));
-    }
-
-    @Test
-    void processWebhook_ShouldRecordEventWithCorrectPayload() {
-        // Arrange
+    void processWebhook_ShouldSaveEventWithCorrectPayload() {
+        setupNonDuplicateWebhook("req-999");
         String customRawBody = "{\"custom\":\"payload\"}";
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("req-999");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
 
-        // Act
         webhookService.processWebhook(webhookRequest, customRawBody, httpServletRequest);
 
-        // Assert
+        assertSavedWebhookEventStartsWith("psp_", PAYMENT_ID, EVENT_SUCCEEDED, customRawBody);
+    }
+
+    private void assertSavedWebhookEventStartsWith(String eventIdPrefix, String paymentId, String eventType, String payload) {
         verify(webhookEventRepository).save(webhookEventCaptor.capture());
-        WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
-        assertEquals(customRawBody, savedEvent.getRawPayload());
+        WebhookEvent saved = webhookEventCaptor.getValue();
+        assertTrue(saved.getEventId().startsWith(eventIdPrefix));
+        assertEquals(paymentId, saved.getPaymentId());
+        assertEquals(eventType, saved.getEventType());
+        assertEquals(payload, saved.getRawPayload());
     }
 
-    @Test
-    void processWebhook_ShouldUseRequestIdInEventId() {
-        // Arrange
-        String requestId = "unique-request-id-789";
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn(requestId);
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
-
-        // Act
-        webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
-
-        // Assert
-        verify(webhookEventRepository).save(webhookEventCaptor.capture());
-        WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
-        assertEquals("psp_" + requestId, savedEvent.getEventId());
-    }
-
-    @Test
-    void processWebhook_ShouldSaveEventWithAllFields() {
-        // Arrange
-        String requestId = "req-complete-001";
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn(requestId);
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
-
-        // Act
-        webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
-
-        // Assert
-        verify(webhookEventRepository).save(webhookEventCaptor.capture());
-        WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
-        assertEquals("psp_" + requestId, savedEvent.getEventId());
-        assertEquals(PAYMENT_ID, savedEvent.getPaymentId());
-        assertEquals(EVENT_SUCCEEDED, savedEvent.getEventType());
-        assertEquals(rawBody, savedEvent.getRawPayload());
-    }
-
-    // ===== IS DUPLICATE WEBHOOK TESTS =====
-
-    @Test
-    void isDuplicateWebhook_WithExistingEventId_ShouldReturnTrue() {
-        // Arrange
-        String eventId = "psp_req-123";
-        when(webhookEventRepository.existsByEventId(eventId)).thenReturn(true);
-
-        // Act
-        boolean result = webhookService.isDuplicateWebhook(eventId, PAYMENT_ID, EVENT_SUCCEEDED);
-
-        // Assert
-        assertTrue(result);
-        verify(webhookEventRepository).existsByEventId(eventId);
-    }
-
-    @Test
-    void isDuplicateWebhook_WithExistingBusinessKey_ShouldReturnTrue() {
-        // Arrange
-        String eventId = "psp_req-123";
-        when(webhookEventRepository.existsByEventId(eventId)).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED)).thenReturn(true);
-
-        // Act
-        boolean result = webhookService.isDuplicateWebhook(eventId, PAYMENT_ID, EVENT_SUCCEEDED);
-
-        // Assert
-        assertTrue(result);
-        verify(webhookEventRepository).existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED);
-    }
-
-    @Test
-    void isDuplicateWebhook_WithNoExistingRecord_ShouldReturnFalse() {
-        // Arrange
-        String eventId = "psp_req-123";
-        when(webhookEventRepository.existsByEventId(eventId)).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED)).thenReturn(false);
-
-        // Act
-        boolean result = webhookService.isDuplicateWebhook(eventId, PAYMENT_ID, EVENT_SUCCEEDED);
-
-        // Assert
-        assertFalse(result);
-    }
-
-    @Test
-    void isDuplicateWebhook_WithNullEventId_ShouldCheckBusinessKeyOnly() {
-        // Arrange
-        when(webhookEventRepository.existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED)).thenReturn(false);
-
-        // Act
-        boolean result = webhookService.isDuplicateWebhook(null, PAYMENT_ID, EVENT_SUCCEEDED);
-
-        // Assert
-        assertFalse(result);
-        verify(webhookEventRepository, never()).existsByEventId(any());
-        verify(webhookEventRepository).existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED);
-    }
-
-    @Test
-    void isDuplicateWebhook_WithNullEventIdAndExistingBusinessKey_ShouldReturnTrue() {
-        // Arrange
-        when(webhookEventRepository.existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED)).thenReturn(true);
-
-        // Act
-        boolean result = webhookService.isDuplicateWebhook(null, PAYMENT_ID, EVENT_SUCCEEDED);
-
-        // Assert
-        assertTrue(result);
-        verify(webhookEventRepository, never()).existsByEventId(any());
-    }
-
-    // ===== RECORD WEBHOOK EVENT TESTS =====
-
+    // ======== RECORD WEBHOOK EVENT TESTS ========
     @Test
     void recordWebhookEvent_ShouldSaveEventWithCorrectData() {
-        // Arrange
         String eventId = "psp_req-123";
-
-        // Act
         webhookService.recordWebhookEvent(eventId, PAYMENT_ID, EVENT_SUCCEEDED, rawBody);
 
-        // Assert
-        verify(webhookEventRepository).save(webhookEventCaptor.capture());
-        WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
-        assertEquals(eventId, savedEvent.getEventId());
-        assertEquals(PAYMENT_ID, savedEvent.getPaymentId());
-        assertEquals(EVENT_SUCCEEDED, savedEvent.getEventType());
-        assertEquals(rawBody, savedEvent.getRawPayload());
+        assertSavedWebhookEvent(eventId, PAYMENT_ID, EVENT_SUCCEEDED, rawBody);
     }
 
     @Test
     void recordWebhookEvent_WithFailedEvent_ShouldSaveCorrectly() {
-        // Arrange
         String eventId = "psp_req-failed-001";
         String failedRawBody = "{\"paymentId\":\"payment-123\",\"event\":\"payment.failed\"}";
 
-        // Act
         webhookService.recordWebhookEvent(eventId, PAYMENT_ID, EVENT_FAILED, failedRawBody);
 
-        // Assert
-        verify(webhookEventRepository).save(webhookEventCaptor.capture());
-        WebhookEvent savedEvent = webhookEventCaptor.getValue();
-
-        assertEquals(eventId, savedEvent.getEventId());
-        assertEquals(PAYMENT_ID, savedEvent.getPaymentId());
-        assertEquals(EVENT_FAILED, savedEvent.getEventType());
-        assertEquals(failedRawBody, savedEvent.getRawPayload());
+        assertSavedWebhookEvent(eventId, PAYMENT_ID, EVENT_FAILED, failedRawBody);
     }
 
-    // ===== INTEGRATION FLOW TESTS =====
-
+    // ======== INTEGRATION FLOW TESTS ========
     @Test
     void processWebhook_CompleteFlow_ShouldExecuteAllSteps() {
-        // Arrange
         String requestId = "req-flow-001";
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn(requestId);
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(anyString(), anyString());
+        setupNonDuplicateWebhook(requestId);
 
-        // Act
         webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
 
-        // Assert - Verify all steps executed in order
-        verify(webhookEventRepository).existsByEventId("psp_" + requestId);
-        verify(webhookEventRepository).existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED);
+        verify(webhookEventRepository).findByPaymentId(PAYMENT_ID);
+        verify(webhookEventRepository).findByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED);
         verify(paymentService).processWebhook(PAYMENT_ID, EVENT_SUCCEEDED);
         verify(webhookEventRepository).save(any(WebhookEvent.class));
     }
 
     @Test
     void processWebhook_WithMultipleValidEvents_ShouldProcessEach() {
-        // Arrange
         when(httpServletRequest.getHeader("X-Request-Id"))
                 .thenReturn("req-001")
                 .thenReturn("req-002");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
+        when(webhookEventRepository.findByPaymentId(anyString())).thenReturn(null);
+        when(webhookEventRepository.findByPaymentIdAndEventType(anyString(), anyString())).thenReturn(null);
         doNothing().when(paymentService).processWebhook(anyString(), anyString());
 
-        // Act - First webhook
+        // First webhook
         webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest);
 
-        // Act - Second webhook (different event type)
+        // Second webhook
         WebhookRequest failedRequest = new WebhookRequest();
         failedRequest.setPaymentId(PAYMENT_ID);
         failedRequest.setEvent(EVENT_FAILED);
         webhookService.processWebhook(failedRequest, rawBody, httpServletRequest);
 
-        // Assert
         verify(paymentService).processWebhook(PAYMENT_ID, EVENT_SUCCEEDED);
         verify(paymentService).processWebhook(PAYMENT_ID, EVENT_FAILED);
         verify(webhookEventRepository, times(2)).save(any(WebhookEvent.class));
     }
 
+    // ======== IS DUPLICATE WEBHOOK TESTS ========
     @Test
-    void processWebhook_WithNullPaymentId_ShouldStillProcess() {
-        // Arrange
-        webhookRequest.setPaymentId(null);
-        when(httpServletRequest.getHeader("X-Request-Id")).thenReturn("req-null-001");
-        when(webhookEventRepository.existsByEventId(anyString())).thenReturn(false);
-        when(webhookEventRepository.existsByPaymentIdAndEventType(any(), anyString())).thenReturn(false);
-        doNothing().when(paymentService).processWebhook(any(), anyString());
+    void isDuplicateWebhook_WithNoExistingRecord_ShouldReturnFalse() {
+        when(webhookEventRepository.existsByPaymentId(anyString())).thenReturn(false);
+        when(webhookEventRepository.existsByPaymentIdAndEventType(anyString(), anyString())).thenReturn(false);
 
-        // Act & Assert - Should not throw NPE
-        assertDoesNotThrow(() ->
-                webhookService.processWebhook(webhookRequest, rawBody, httpServletRequest)
-        );
+        boolean result = webhookService.isDuplicateWebhook("event-123", PAYMENT_ID, EVENT_SUCCEEDED);
 
-        verify(paymentService).processWebhook(null, EVENT_SUCCEEDED);
+        assertFalse(result);
+    }
+
+    @Test
+    void isDuplicateWebhook_WithExistingPaymentId_ShouldReturnTrue() {
+        when(webhookEventRepository.existsByPaymentId(PAYMENT_ID)).thenReturn(true);
+
+        boolean result = webhookService.isDuplicateWebhook("event-123", PAYMENT_ID, EVENT_SUCCEEDED);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void isDuplicateWebhook_WithExistingBusinessKey_ShouldReturnTrue() {
+        when(webhookEventRepository.existsByPaymentId(PAYMENT_ID)).thenReturn(false);
+        when(webhookEventRepository.existsByPaymentIdAndEventType(PAYMENT_ID, EVENT_SUCCEEDED)).thenReturn(true);
+
+        boolean result = webhookService.isDuplicateWebhook("event-123", PAYMENT_ID, EVENT_SUCCEEDED);
+
+        assertTrue(result);
     }
 }

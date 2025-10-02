@@ -1,6 +1,8 @@
 package com.onafriq.paylite.service.paylite_service.service;
 
 import com.onafriq.paylite.service.paylite_service.dto.WebhookRequest;
+import com.onafriq.paylite.service.paylite_service.exception.IdempotencyConflictException;
+import com.onafriq.paylite.service.paylite_service.exception.WebhookConflictException;
 import com.onafriq.paylite.service.paylite_service.repository.WebhookEventRepository;
 import com.onafriq.paylite.service.paylite_service.entity.WebhookEvent;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,10 +46,17 @@ public class WebhookService {
 
         String eventId = generateEventId(request, webhookRequest);
 
-        if (isDuplicateWebhook(eventId, paymentId, eventType)) {
-            logger.info("Duplicate webhook detected - eventId: {}, payment: {}, event: {}",
-                    eventId, paymentId, eventType);
-            return; // Idempotent - no further processing
+        // Fetch existing event if duplicate
+        WebhookEvent existingEvent = getDuplicateEvent(paymentId, eventType);
+
+        if (existingEvent != null) {
+            if (existingEvent.getRawPayload().equals(rawBody)) {
+                logger.info("Duplicate webhook with same payload detected - returning same response");
+                return; // idempotent: same payload, do nothing
+            } else {
+                logger.warn("Duplicate webhook with different payload detected - returning 409 Conflict");
+                throw new WebhookConflictException("Duplicate webhook with different payload for payment: " + paymentId);
+            }
         }
 
         paymentService.processWebhook(paymentId, eventType);
@@ -55,6 +64,22 @@ public class WebhookService {
         recordWebhookEvent(eventId, paymentId, eventType, rawBody);
 
         logger.info("Completed webhook processing - payment: {}, event: {}", paymentId, eventType);
+    }
+
+    private WebhookEvent getDuplicateEvent(String paymentId, String eventType) {
+        // Strategy 1: by paymentId
+        WebhookEvent byPaymentId = webhookEventRepository.findByPaymentId(paymentId);
+        if (byPaymentId != null) {
+            return byPaymentId;
+        }
+
+        // Strategy 2: by business key (paymentId + eventType)
+        WebhookEvent byBusinessKey = webhookEventRepository.findByPaymentIdAndEventType(paymentId, eventType);
+        if (byBusinessKey != null) {
+            return byBusinessKey;
+        }
+
+        return null;
     }
 
     /**
@@ -80,9 +105,9 @@ public class WebhookService {
     }
 
     public boolean isDuplicateWebhook(String eventId, String paymentId, String eventType) {
-        // Strategy 1: Event ID-based deduplication
-        if (eventId != null && webhookEventRepository.existsByEventId(eventId)) {
-            logger.debug("Duplicate detected by event ID: {}", eventId);
+        // Strategy 1: Payment ID-based deduplication
+        if (eventId != null && webhookEventRepository.existsByPaymentId(paymentId)) {
+            logger.debug("Duplicate detected by payment ID: {}", eventId);
             return true;
         }
 

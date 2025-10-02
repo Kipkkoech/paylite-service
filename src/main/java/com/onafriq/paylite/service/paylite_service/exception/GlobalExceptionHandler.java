@@ -108,4 +108,15 @@ public class GlobalExceptionHandler {
         );
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
     }
+    @ExceptionHandler(WebhookConflictException.class)
+    public ResponseEntity<ErrorResponse> handleWebhookConflict(WebhookConflictException ex) {
+        logger.error("Duplicate webhook with different payload for payment {}", ex.getMessage());
+        ErrorResponse errorResponse = new ErrorResponse(
+                "Duplicate webhook with different payload for payment:",
+                HttpStatus.CONFLICT.value(),
+                "webhook_conflict"
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
+
+    }
 }
